@@ -1,0 +1,29 @@
+# Machine configuration and credentials
+/config.json
+/gpt-quota-gate.json
+/gpt-quota-gate-state.json*
+/secrets*.json
+*.dpapi.json
+.env
+.env.*
+!.env.example
+/examples/codex.local.toml
+# Runtime, captures, databases and backups
+/logs/
+/runtime/
+/health/
+/backup/
+/backups/
+*.log
+*.jsonl
+*.sqlite*
+*.db
+*.bak*
+*.pid
+# Build outputs
+/dist/
+/node_modules/
+*.tgz
+__pycache__/
+.DS_Store
+Thumbs.db

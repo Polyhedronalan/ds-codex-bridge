@@ -1,0 +1,5 @@
+{
+  "enabled": false,
+  "reserve_percent": 3,
+  "python": "python"
+}

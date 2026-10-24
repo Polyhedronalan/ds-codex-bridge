@@ -1,0 +1,13 @@
+# Merge these keys/tables into your Codex config; do not replace the entire file.
+# Select a model actually available to your account and installed Codex catalog.
+model_provider = "bridge"
+model = "deepseek-flash"
+
+[model_providers.bridge]
+name = "DS-Codex Bridge"
+base_url = "http://127.0.0.1:8799"
+wire_api = "responses"
+requires_openai_auth = true
+
+[model_providers.bridge.query_params]
+bridge_key = "REPLACE_WITH_YOUR_GENERATED_LOCAL_KEY"

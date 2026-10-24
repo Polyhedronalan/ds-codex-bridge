@@ -1,0 +1,10 @@
+* text=auto
+# Preserve the source snapshot hashes across platforms.
+*.mjs -text
+*.json text eol=lf
+*.md text eol=lf
+*.yml text eol=lf
+*.py text eol=lf
+*.toml text eol=lf
+*.ps1 text eol=crlf
+*.cmd text eol=crlf

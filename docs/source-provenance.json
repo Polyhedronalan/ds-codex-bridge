@@ -1,0 +1,45 @@
+{
+  "source": "Existing maintained Bridge source, snapshot 2026-10-24",
+  "core_files": [
+    {
+      "path": "bridge.mjs",
+      "sha256": "05283205fd3b5e012d91fe35526b001f4bc73273096b4ab490efd8fa9d24fa3f"
+    },
+    {
+      "path": "config.mjs",
+      "sha256": "05a4eaffb17cc899099216c55c4cb74c9dd8ead3ee82283d0015bcb821fd0c40"
+    },
+    {
+      "path": "compat.mjs",
+      "sha256": "c03068e452148f02aa874603c8a4978b58af49df7484dc458d3aaf8808a91a53"
+    },
+    {
+      "path": "deepseek-history.mjs",
+      "sha256": "05d96a9f65deb9bdd56e870558ca742a849135d4d78ae9d934c6fdc504396fc4"
+    },
+    {
+      "path": "gpt-quota-gate.mjs",
+      "sha256": "6cf1060d8263bb0cc982a003380b554382cd045f4368e53c61b1f15bcb7e94ed"
+    },
+    {
+      "path": "log-rotation.mjs",
+      "sha256": "88fb3bead7ba1c2fda2d6691580ec506a9a440cc4a7c7438e02ddd657bd6dc5f"
+    },
+    {
+      "path": "logger.mjs",
+      "sha256": "cee9aff60992c0b4c6e6d170ec2ed71c4fa08c949abcbfe2c511575fcce73979"
+    },
+    {
+      "path": "security.mjs",
+      "sha256": "fc52a4f1df811e2318de8560e6fca7a9dee66239ae961b0aac0a213936531093"
+    },
+    {
+      "path": "tool-policy.mjs",
+      "sha256": "033768b79b8251b2cd0c16bee4b370091dda28c3f7a2a79dabd9fc7d1042a20b"
+    },
+    {
+      "path": "upstreams.mjs",
+      "sha256": "9841dac0fddf364970eb555028a0ab5107a68ba091730e17d06c1c03b1426af6"
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "name": "ds-codex-bridge",
+  "version": "0.1.0",
+  "description": "Loopback Responses compatibility bridge for Codex, DeepSeek and ChatGPT OAuth",
+  "private": true,
+  "license": "UNLICENSED",
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "start": "node bridge.mjs",
+    "test": "node --test tests/bridge.test.mjs tests/deepseek-history.test.mjs tests/log-rotation.test.mjs tests/tool-policy.test.mjs tests/quota-gate.test.mjs",
+    "check": "python tools/package-release.py --check",
+    "release": "python tools/package-release.py"
+  }
+}

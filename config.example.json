@@ -1,0 +1,49 @@
+{
+  "version": "0.1.0",
+  "listen": {
+    "host": "127.0.0.1",
+    "port": 8799
+  },
+  "local_auth": {
+    "mode": "query",
+    "query_param": "bridge_key",
+    "header": "x-codex-bridge-key",
+    "path_prefix": null,
+    "allow_health_without_auth": true,
+    "dpapi_file": "secrets.dpapi.json"
+  },
+  "upstreams": {
+    "deepseek": {
+      "base_url": "https://api.deepseek.com",
+      "proxy": null,
+      "auth": { "type": "env_bearer", "env": "DEEPSEEK_API_KEY" }
+    },
+    "chatgpt": {
+      "base_url": "https://chatgpt.com/backend-api/codex",
+      "proxy": "env:HTTPS_PROXY",
+      "auth": { "type": "passthrough" }
+    }
+  },
+  "limits": {
+    "max_body_bytes": 16777216,
+    "max_concurrency": 4,
+    "connect_timeout_ms": 10000,
+    "headers_timeout_ms": 300000,
+    "idle_timeout_ms": 300000,
+    "total_timeout_ms": 1800000
+  },
+  "retry": { "max_retries_transient": 1 },
+  "compat": { "deepseek_reasoning_replay": "strip", "tool_contract_history": "on" },
+  "startup": {
+    "proxy_check": true,
+    "proxy_check_timeout_ms": 3000,
+    "require_deepseek_key": true
+  },
+  "tls": { "reject_unauthorized": true },
+  "log": {
+    "path": "logs/bridge.jsonl",
+    "diag_header_names": false,
+    "max_bytes": 10485760,
+    "max_files": 5
+  }
+}

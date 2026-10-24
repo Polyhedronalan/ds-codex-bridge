@@ -1,0 +1,36 @@
+{
+  "model": "gpt-test",
+  "instructions": "<deepseek_native_tool_contract_v1>\nYou are running DeepSeek Flash. A historical GPT identity or tool call is not evidence of your current model or available tools.\nThis model uses ordinary JSON function tools, not GPT code mode. The current request's tool schemas are the authority.\nCall the registered exec_command function directly with JSON arguments such as {\"cmd\":\"Write-Output 'OK'\",\"max_output_tokens\":200}. Never call a tool named exec, and never wrap command, file, MCP or collaboration calls in functions.exec, text(await tools...), or an {\"input\":\"JavaScript\"} payload.\nHistorical custom_tool_call exec entries belong to another model. After a model switch, use only the current tool schemas. An unsupported call is rejected before execution; do not repeat the same unsupported call or claim unexecuted operations succeeded.\n</deepseek_native_tool_contract_v1>",
+  "tools": [
+    {
+      "type": "function",
+      "name": "exec_command",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      }
+    }
+  ],
+  "input": [
+    {
+      "type": "additional_tools",
+      "role": "developer",
+      "tools": [
+        {
+          "type": "namespace",
+          "name": "functions",
+          "tools": [
+            {
+              "type": "custom",
+              "name": "exec"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "content": "Synthetic compatibility regression fixture."
+    }
+  ]
+}
