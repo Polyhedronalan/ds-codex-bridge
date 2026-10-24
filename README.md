@@ -1,4 +1,4 @@
-# DS-Codex Bridge
+# DS-Codex Bridge（穷鬼OAI plus会员外挂梁圣）
 
 供 Codex 使用的本地 Responses 兼容桥：按请求模型名前缀，将 `deepseek-*` 转发到 DeepSeek，将 `gpt-*` 转发到 ChatGPT Codex OAuth 上游，并处理已知的历史消息兼容问题。
 
