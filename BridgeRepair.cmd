@@ -17,11 +17,12 @@ if not exist "%SCRIPT%" (
   exit /b 1
 )
 
-echo Repairing the Codex Bridge. This can take up to a minute; do not close the window.
+echo Checking the Codex Bridge and repairing supported local faults.
+echo Upstream, account and proxy faults need the targeted guidance in the report.
 echo.
 "%PS%" -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT%" -Repair -Report
 set "RC=%ERRORLEVEL%"
-echo [BridgeRepair] exit code = %RC%   ^(0 = healthy, 2 = still broken^)
+echo [BridgeRepair] exit code = %RC%   ^(0 = no active problem, 2 = see targeted guidance^)
 echo.
 pause
 exit /b %RC%

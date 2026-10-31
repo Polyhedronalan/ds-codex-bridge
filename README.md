@@ -92,6 +92,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File stop-production.ps1
 
 这些工具仅支持默认的 `127.0.0.1:8799` 和本目录 `config.json`；自定义端口或 `BRIDGE_CONFIG` 时请使用前台运行。不会注册自启或计划任务。没有 `CodexBridgeSupervisor` 计划任务时，详细健康工具会报告恢复链缺失；前台运行可直接查看 `/health`。请勿在同一端口运行两份 Bridge。
 
+修复仅处理本地进程故障。报告中的“下一步”会区分代理/TLS、上游鉴权、余额及请求错误；这些问题不会通过反复重启健康的 Bridge 自动消失。手动修复可对连接故障发送一次不携带 OAuth/API Key 的 HEAD 诊断，HTTP 回应只代表链路可达，不代表模型请求已成功。卡死会在同一次点击中连续确认，修复步骤失败会显示具体退出码。
+
+巡检保留近 90 分钟的失败计数。连接、超时、限流、5xx 和 HTTP 402 故障，须在同一上游、同一模型最后一次失败后至少有 3 次完整请求成功，才解除活动告警；响应头记录和其他模型成功不算恢复。鉴权及请求内容问题继续报告。HTTP 402 应检查上游计费/余额，重启 Bridge 无法补充余额。
+
 ## 可选 GPT 额度保留门禁
 
 公开包默认关闭门禁（不附带本机生产策略）。只有主动将 `examples/gpt-quota-gate.example.json` 复制为根目录 `gpt-quota-gate.json` 并设为 `enabled:true` 才启用。
@@ -102,6 +106,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File stop-production.ps1
 
 ```powershell
 npm test
+npm run test:transport
+npm run test:health  # Windows PowerShell regression checks
 npm run check
 npm run release
 ```

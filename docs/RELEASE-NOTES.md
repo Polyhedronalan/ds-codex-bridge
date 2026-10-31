@@ -28,3 +28,25 @@ Local validation is described in the delivery report outside this upload directo
 Real DeepSeek/GPT sends, global provider activation, Windows background lifecycle and
 the remote CI matrix require their own environment acceptance; unit/mock checks do not
 establish those outcomes.
+
+## Health probe repair — 2026-10-25
+
+- Preserve historical request failure counts, but clear recovered transport, capacity,
+  5xx and billing alerts only after three later completed successes for the same
+  upstream and model. Header diagnostics and other routes cannot prove recovery.
+- Keep caller-specific authentication and payload failures active. Show HTTP 402 as
+  an upstream billing/balance issue; a Bridge restart cannot replenish the account.
+- Add isolated Windows PowerShell regression checks and include them in Windows CI.
+  This changes the health probe only; the ten core module hashes remain unchanged.
+
+## Manual repair outcomes — 2026-10-29
+
+- Classify local process faults separately from upstream authentication, billing,
+  proxy/TLS and request faults; provide targeted guidance instead of a repeat-click loop.
+- Confirm a manual wedge in one invocation, keeping the same listener identity across probes.
+- Preserve stop/start exit codes and stop after a failed stop. Mark recovery only after
+  the post-action probe has no remaining active problem; expose local readiness separately.
+- Manual transport diagnostics use an unauthenticated HEAD and enforce TLS validation.
+  Any HTTP response proves transport only, not account/model access. Scheduled checks do
+  not send upstream probes. No proxy, credential, routing or system network settings change.
+- Include isolated decision/lifecycle regression tests and credential-free transport tests.

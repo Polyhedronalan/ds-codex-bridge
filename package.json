@@ -9,6 +9,8 @@
   "scripts": {
     "start": "node bridge.mjs",
     "test": "node --test tests/bridge.test.mjs tests/deepseek-history.test.mjs tests/log-rotation.test.mjs tests/tool-policy.test.mjs tests/quota-gate.test.mjs",
+    "test:health": "powershell -NoProfile -ExecutionPolicy Bypass -File tests/health-log.test.ps1 && powershell -NoProfile -ExecutionPolicy Bypass -File tests/repair-policy.test.ps1",
+    "test:transport": "node --test tests/transport-probe.test.mjs",
     "check": "python tools/package-release.py --check",
     "release": "python tools/package-release.py"
   }
