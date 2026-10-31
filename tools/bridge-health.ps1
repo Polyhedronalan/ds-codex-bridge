@@ -57,6 +57,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot '..\runtime-lib.ps1')
+. (Join-Path $PSScriptRoot 'repair-policy.ps1')
 Initialize-BridgeRuntime
 
 $healthPath     = Join-Path $script:RuntimeDir 'health-last.json'
@@ -212,7 +213,16 @@ function Get-BridgeLogWindowStats {
         client_cancelled = 0
         unknown_model    = 0
         failures         = [ordered]@{}
+        active_failures  = [ordered]@{}
+        recovered_failures = [ordered]@{}
+        failure_details  = @()
     }
+    $routes = @{}
+    $groups = [ordered]@{}
+    # Only transport, capacity and billing failures can be cleared by later traffic.
+    # Payload/auth/local errors can affect one caller even while another caller succeeds.
+    $recoverableCodes = @('BRIDGE_UPSTREAM_ERROR', 'BRIDGE_UPSTREAM_UNAVAILABLE',
+        'BRIDGE_UPSTREAM_TIMEOUT', 'BRIDGE_PROXY_UNAVAILABLE', 'BRIDGE_UPSTREAM_RATE_LIMITED')
     try {
         $logPath = Join-Path $script:LogDir 'bridge.jsonl'
         if (-not (Test-Path -LiteralPath $logPath -PathType Leaf)) { return $stats }
@@ -229,14 +239,51 @@ function Get-BridgeLogWindowStats {
             if ($when -lt $cut) { continue }
             $stats.records = $stats.records + 1
             if ($when.ToString('o') -gt $stats.last_ts) { $stats.last_ts = $when.ToString('o') }
+            # request_shape carries the HTTP headers status before the response completes.
+            # It is not evidence of a successful request (nor is /health).
+            if (Get-Field $o 'event') { continue }
+            $upstream = [string](Get-Field $o 'upstream')
+            $model = [string](Get-Field $o 'model')
+            $status = 0
+            [void][int]::TryParse([string](Get-Field $o 'status'), [ref]$status)
+            $routeKey = $upstream + '|' + $model
+            if (-not $routes.ContainsKey($routeKey)) {
+                $routes[$routeKey] = @{ last_failure = [datetime]::MinValue; successes = @() }
+            }
+            $route = $routes[$routeKey]
             $code = [string](Get-Field $o 'error_code')
-            if (-not $code) { continue }
+            if (-not $code) {
+                if ($status -eq 200 -and $upstream -and $model) { $route.successes += $when }
+                continue
+            }
             if ($code -eq 'BRIDGE_CLIENT_CANCELLED') { $stats.client_cancelled = $stats.client_cancelled + 1; continue }
             if ($code -eq 'BRIDGE_UNKNOWN_MODEL') { $stats.unknown_model = $stats.unknown_model + 1; continue }
             if ($script:LogFailureCodes -contains $code) {
                 if ($stats.failures.Contains($code)) { $stats.failures[$code] = $stats.failures[$code] + 1 }
                 else { $stats.failures[$code] = 1 }
+                if ($when -gt $route.last_failure) { $route.last_failure = $when }
+                $groupKey = $routeKey + '|' + $code + '|' + $status
+                if (-not $groups.Contains($groupKey)) {
+                    $groups[$groupKey] = [ordered]@{
+                        code = $code; upstream = $upstream; model = $model; status = $status
+                        count = 0; last_failure_ts = ''; recovery_successes = 0; recovered = $false
+                    }
+                }
+                $group = $groups[$groupKey]
+                $group.count += 1
+                if ($when.ToString('o') -gt $group.last_failure_ts) { $group.last_failure_ts = $when.ToString('o') }
             }
+        }
+        foreach ($group in $groups.Values) {
+            $route = $routes[$group.upstream + '|' + $group.model]
+            $group.recovery_successes = @($route.successes | Where-Object { $_ -gt $route.last_failure }).Count
+            $group.recovered = [bool]($group.upstream -and $group.model -and
+                $group.code -in $recoverableCodes -and $group.recovery_successes -ge 3 -and
+                ($group.code -ne 'BRIDGE_UPSTREAM_ERROR' -or $group.status -eq 402 -or $group.status -ge 500))
+            $target = if ($group.recovered) { $stats.recovered_failures } else { $stats.active_failures }
+            if ($target.Contains($group.code)) { $target[$group.code] += $group.count }
+            else { $target[$group.code] = $group.count }
+            $stats.failure_details += $group
         }
     } catch {
     }
@@ -313,6 +360,9 @@ function Get-BridgeProbe {
         log_client_cancelled = 0
         log_unknown_model   = 0
         log_failures        = [ordered]@{}
+        log_active_failures = [ordered]@{}
+        log_recovered_failures = [ordered]@{}
+        log_failure_details = @()
         config_exists       = $false
         config_bridge_section = $false
         config_key_lines    = 0
@@ -463,9 +513,15 @@ function Get-BridgeProbe {
         $p.log_client_cancelled = $logStats.client_cancelled
         $p.log_unknown_model = $logStats.unknown_model
         foreach ($code in $logStats.failures.Keys) { $p.log_failures[$code] = $logStats.failures[$code] }
+        $p.log_active_failures = $logStats.active_failures
+        $p.log_recovered_failures = $logStats.recovered_failures
+        $p.log_failure_details = @($logStats.failure_details)
+        foreach ($code in $logStats.recovered_failures.Keys) {
+            $p.notes += ('recovered_' + ([string]$code).ToLower() + '_x' + $logStats.recovered_failures[$code])
+        }
         if ($p.status -ne 'stopped') {
-            foreach ($code in $logStats.failures.Keys) {
-                $p.problems += ('recent_' + ([string]$code).ToLower() + '_x' + $logStats.failures[$code])
+            foreach ($code in $logStats.active_failures.Keys) {
+                $p.problems += ('recent_' + ([string]$code).ToLower() + '_x' + $logStats.active_failures[$code])
             }
         }
 
@@ -497,11 +553,18 @@ function Get-BridgeProbe {
 
 # ---------------------------------------------------------------- repair
 
+function Invoke-BridgeLifecycleStep {
+    param([string]$Path, [string]$ProxyAddress = '', [switch]$Start)
+    $ps = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    if ($Start) { & $ps -NoProfile -ExecutionPolicy Bypass -File $Path -Proxy $ProxyAddress -Quiet *> $null }
+    else { & $ps -NoProfile -ExecutionPolicy Bypass -File $Path *> $null }
+    return [int]$LASTEXITCODE
+}
+
 function Invoke-BridgeRepair {
     param([string]$Status, [string]$ProxyAddress)
     $stopScript = Join-Path $script:BridgeRoot 'stop-production.ps1'
     $startScript = Join-Path $script:BridgeRoot 'start-production.ps1'
-    $ps = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
     $actions = @()
 
     if ($Status -eq 'foreign') {
@@ -516,19 +579,31 @@ function Invoke-BridgeRepair {
     if ($Status -eq 'stopped') {
         return @{ outcome = 'skipped_intentional_stop'; actions = @('none:stop_flag_present') }
     }
+    if ($Status -notin @('down', 'wedged', 'auth')) {
+        return @{ outcome = 'refused_unknown_or_healthy_state'; actions = @('none:local_restart_not_indicated') }
+    }
 
     if (($Status -eq 'wedged' -or $Status -eq 'auth') -and (Test-Path -LiteralPath $stopScript)) {
         # stop-production.ps1 re-verifies the identity itself and refuses unknown pids.
-        & $ps -NoProfile -ExecutionPolicy Bypass -File $stopScript *> $null
-        $actions += ('stop-production.ps1 exit=' + $LASTEXITCODE)
+        $stepExit = Invoke-BridgeLifecycleStep -Path $stopScript
+        $actions += ('stop-production.ps1 exit=' + $stepExit)
+        if ($stepExit -ne 0) {
+            return @{ outcome = 'local_stop_failed'; actions = $actions }
+        }
         Start-Sleep -Seconds 2
+    } elseif ($Status -eq 'wedged' -or $Status -eq 'auth') {
+        return @{ outcome = 'local_stop_missing'; actions = @('stop-production.ps1 missing') }
     }
 
     if (Test-Path -LiteralPath $startScript) {
-        & $ps -NoProfile -ExecutionPolicy Bypass -File $startScript -Proxy $ProxyAddress -Quiet *> $null
-        $actions += ('start-production.ps1 exit=' + $LASTEXITCODE)
+        $stepExit = Invoke-BridgeLifecycleStep -Path $startScript -ProxyAddress $ProxyAddress -Start
+        $actions += ('start-production.ps1 exit=' + $stepExit)
+        if ($stepExit -ne 0) {
+            return @{ outcome = 'local_start_failed'; actions = $actions }
+        }
     } else {
         $actions += 'start-production.ps1 missing'
+        return @{ outcome = 'local_start_missing'; actions = $actions }
     }
 
     return @{ outcome = 'repair_attempted'; actions = $actions }
@@ -540,44 +615,65 @@ $probe = Get-BridgeProbe
 $action = $null
 $previous = Read-JsonFile -Path $healthPath
 $wedgeStreak = 0
-if ($previous) {
+if ($previous -and [int](Get-Field $previous 'port_owner_pid') -eq [int]$probe.port_owner_pid) {
     $prevStreak = Get-Field $previous 'wedge_streak'
     if ($prevStreak) { $wedgeStreak = [int]$prevStreak }
 }
 $wedgeStreak = if ($probe.status -eq 'wedged') { $wedgeStreak + 1 } else { 0 }
 
 if ($Watch -or $Repair) {
-    $shouldRepair = $false
-    $repairStatus = $probe.status
-    $authMismatch = $probe.log_failures.Contains('BRIDGE_AUTH_FAILED')
-    if ($probe.status -eq 'down') { $shouldRepair = $true }
-    elseif ($probe.status -eq 'wedged' -and $wedgeStreak -ge [Math]::Max(1, $WedgeConfirmProbes)) { $shouldRepair = $true }
-    elseif ($Repair -and -not $Watch -and $probe.status -eq 'healthy' -and $authMismatch) {
-        # The running Bridge still holds an older local key (a key rotation or an installer wrote a
-        # new one), so every client request comes back 401 BRIDGE_AUTH_FAILED. A restart is the fix,
-        # but it interrupts in-flight requests, so only a human pressing the one-click repair does
-        # it - the scheduled watch reports it instead.
-        $shouldRepair = $true
-        $repairStatus = 'auth'
+    if ($Repair -and -not $Watch -and $probe.status -eq 'wedged') {
+        # A human click confirms consecutive probes now; it does not require another click/hour.
+        $confirmed = Confirm-BridgeManualWedge -Probe $probe -ConfirmProbes $WedgeConfirmProbes
+        $probe = $confirmed.probe
+        $wedgeStreak = $confirmed.streak
     }
-
-    if ($shouldRepair) {
-        $action = Invoke-BridgeRepair -Status $repairStatus -ProxyAddress $Proxy
+    $plan = Get-BridgeRepairPlan -Probe $probe -Manual ([bool]($Repair -and -not $Watch)) -WedgeStreak $wedgeStreak -ConfirmProbes $WedgeConfirmProbes
+    if ($plan.repair) {
+        $action = Invoke-BridgeRepair -Status $plan.status -ProxyAddress $Proxy
         $probe = Get-BridgeProbe
         $wedgeStreak = if ($probe.status -eq 'wedged') { 2 } else { 0 }
+    } elseif ($Repair) {
+        $action = @{ outcome = $plan.outcome; actions = @('none:no_local_restart_required_or_safe') }
     }
 }
 
 $repairActions = New-Object System.Collections.ArrayList
 $repairOutcome = ''
 if ($action) {
-    $repairOutcome = [string]$action.outcome
+    $repairOutcome = Get-BridgeLocalRepairOutcome -AttemptOutcome ([string]$action.outcome) -Probe $probe
     foreach ($a in @($action.actions)) { [void]$repairActions.Add([string]$a) }
 }
 $probe['wedge_streak'] = $wedgeStreak
-$probe['repaired'] = [bool]($repairOutcome -eq 'repair_attempted')
+$probe['repaired'] = [bool]($repairOutcome -eq 'local_recovery_verified')
+$probe['repair_attempted'] = [bool]($action -and $action.outcome -in @('repair_attempted', 'local_stop_failed', 'local_start_failed'))
 $probe['repair_actions'] = @($repairActions.ToArray())
 $probe['repair_outcome'] = $repairOutcome
+$probe['repair_guidance'] = Get-BridgeRepairGuidance -Probe $probe
+$probe['transport_checks'] = @()
+# Explicit manual diagnostics only; never poll an upstream on the scheduled Watch path.
+# This sends HEAD without API keys/OAuth or model requests. Any HTTP response proves TLS only.
+if ($Repair -and -not $Watch -and $probe.status -eq 'healthy') {
+    $routes = @($probe.log_failure_details | Where-Object {
+        -not $_.recovered -and $_.upstream -in @('chatgpt', 'deepseek') -and
+        $_.code -in @('BRIDGE_UPSTREAM_UNAVAILABLE', 'BRIDGE_PROXY_UNAVAILABLE', 'BRIDGE_UPSTREAM_TIMEOUT')
+    } | ForEach-Object { $_.upstream } | Select-Object -Unique)
+    foreach ($route in $routes) {
+        $originalHttpsProxy = $env:HTTPS_PROXY
+        try {
+            $node = Resolve-BridgeNode
+            # Match the proxy argument that this entrypoint passes to start-production.
+            $env:HTTPS_PROXY = $Proxy
+            $transportOutput = & $node (Join-Path $PSScriptRoot 'test-transport.mjs') $route 2>$null
+            $transportResult = $transportOutput | ConvertFrom-Json
+            $probe['transport_checks'] += $transportResult
+        } catch {
+            $probe['transport_checks'] += @{ upstream = $route; scope = 'transport_only'; reason = 'probe_unavailable'; transport_reachable = $false }
+        } finally {
+            $env:HTTPS_PROXY = $originalHttpsProxy
+        }
+    }
+}
 
 Write-JsonFile -Path $healthPath -Object $probe | Out-Null
 
@@ -597,11 +693,8 @@ if ($isProblem) {
         $firstSeen = [string](Get-Field $previousAlert 'first_seen')
         $count = [int](Get-Field $previousAlert 'count') + 1
     }
-    $helpText = if ($probe.status -eq 'degraded') {
-        'DeepSeek 凭据缺失：桥降级运行（GPT 通道正常）。检查 bridge\secrets.dpapi.json（DPAPI 用户级）或用 tools\protect-secret.ps1 重新写入。'
-    } else {
-        '桌面端双击 bridge\BridgeRepair.cmd 一键修复；详见 bridge\HEALTH-AND-REPAIR.md'
-    }
+    $billingProblem = @($probe.log_failure_details | Where-Object { $_.status -eq 402 -and -not $_.recovered }).Count -gt 0
+    $helpText = [string]$probe.repair_guidance
     $alert = [ordered]@{
         active          = $true
         machine         = $machine
@@ -639,13 +732,13 @@ if ($isProblem) {
     if ($shouldNotify) {
         $notified = $false
         if (-not $NoNotify) {
-            $notifyHint = if ($probe.status -eq 'degraded') { '需检查 DeepSeek 凭据' } else { '双击 bridge\BridgeRepair.cmd 一键修复' }
+            $notifyHint = $helpText
             $notified = Send-BridgeBalloon -Title 'Codex Bridge 异常' -Text ($probe.status + ' | ' + $reason + ' | ' + $notifyHint)
         }
         $alert['last_notified'] = $nowUtc.ToString('o')
         Write-JsonFile -Path $currentPath -Object $alert | Out-Null
         Write-AlertRecord -Record ([ordered]@{
-            ts = $nowUtc.ToString('o'); event = if ($repairedNow) { 'repaired-but-still-broken' } else { 'alert' }
+            ts = $nowUtc.ToString('o'); event = if ($probe.repair_attempted) { 'local-repair-result-problem-remains' } else { 'alert' }
             machine = $machine; status = $probe.status; reason = $reason; count = $count
             owner_pid = $probe.port_owner_pid; identity = $probe.identity
             repair_outcome = [string]$probe.repair_outcome; repair_actions = @($probe.repair_actions)
@@ -701,6 +794,13 @@ if ($Report) {
     Write-Output ('  请求日志    : 近 ' + $probe.log_window_minutes + ' 分钟 ' + $probe.log_records + ' 条; 上游/鉴权失败=' + $failureTotal + ', 客户端取消=' + $probe.log_client_cancelled + ', 未知模型=' + $probe.log_unknown_model)
     if ($failureTotal -gt 0) {
         foreach ($k in $probe.log_failures.Keys) { Write-Output ('                ' + $k + ' x' + $probe.log_failures[$k]) }
+        foreach ($detail in $probe.log_failure_details) {
+            $recoveryLabel = if ($detail.recovered) { 'recovered' } else { 'active' }
+            Write-Output ('                ' + $detail.upstream + '/' + $detail.model + ' HTTP ' + $detail.status + ': ' + $recoveryLabel + ' (later successes=' + $detail.recovery_successes + ')')
+            if ($detail.status -eq 402) {
+                Write-Output '                HTTP 402: 上游计费/余额问题；重启 Bridge 无法补充余额。'
+            }
+        }
     }
 
     $cfgLabel = 'ok'
@@ -714,6 +814,11 @@ if ($Report) {
         Write-Output '  说明        : DeepSeek Key 未加载（桥仍服务 GPT 通道）。用本用户运行 tools\protect-secret.ps1 -DeepSeekApiKey <key> 写回 DPAPI 文件即可恢复。'
     }
     if (@($probe.repair_actions).Count -gt 0) { Write-Output ('  修复动作    : ' + (@($probe.repair_actions) -join ' | ')) }
+    if ($probe.repair_outcome) { Write-Output ('  修复结论    : ' + $probe.repair_outcome) }
+    if ($probe.repair_guidance) { Write-Output ('  下一步      : ' + $probe.repair_guidance) }
+    foreach ($check in $probe.transport_checks) {
+        Write-Output ('  链路诊断    : ' + $check.upstream + ' reachable=' + $check.transport_reachable + ' reason=' + $check.reason)
+    }
 
     if ((@($probe.config_duplicate_sections).Count -gt 0) -or (@($probe.config_unclosed_lines).Count -gt 0)) {
         Write-Output ''
@@ -728,7 +833,7 @@ if ($Report) {
     Write-Output ('  告警历史    : ' + $alertLogPath)
     Write-Output ''
     if ($isProblem) {
-        Write-Output '  结果: PROBLEM - 需要修复（双击 BridgeRepair.cmd）'
+        Write-Output '  结果: PROBLEM - 查看“下一步”；未确认恢复，不要反复点击修复。'
     } else {
         Write-Output '  结果: PASS'
     }

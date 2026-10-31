@@ -35,6 +35,8 @@ BridgeHealth.cmd
 BridgeRepair.cmd
 tools/protect-secret.ps1
 tools/bridge-health.ps1
+tools/repair-policy.ps1
+tools/test-transport.mjs
 tools/Initialize-Bridge.ps1
 tools/package-release.py
 tests/bridge.test.mjs
@@ -42,6 +44,9 @@ tests/deepseek-history.test.mjs
 tests/log-rotation.test.mjs
 tests/tool-policy.test.mjs
 tests/quota-gate.test.mjs
+tests/health-log.test.ps1
+tests/repair-policy.test.ps1
+tests/transport-probe.test.mjs
 tests/fixtures/tool-policy-legacy-guard.json
 tests/fixtures/gpt-after-deepseek.json
 examples/codex.config.example.toml
